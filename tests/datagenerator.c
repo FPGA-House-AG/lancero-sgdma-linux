@@ -69,11 +69,12 @@ void *read_work(void *id)
   int fd = open("lancero_sgdma", O_RDWR);
   assert(fd >= 0);
 
+  int fd_user = open("lancero_user", O_RDWR | O_SYNC);
+  assert(fd_user >= 0);
+
   while (1)
   {
 
-  int fd_user = open("lancero_user", O_RDWR | O_SYNC);
-  assert(fd_user >= 0);
   uint32_t buffer;
   int rc = pread(fd_user, &buffer, 4, 0x1000 + n * 0x2000);
   printf("write tester ID = 0x%x\n", buffer);
@@ -159,6 +160,7 @@ void *read_work(void *id)
     printf(" read() of size %d OK\n", size);
   }
   }
+  close(fd_user);
   close(fd);
 }
 
