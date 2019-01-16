@@ -3042,7 +3042,9 @@ static int lancero_config(struct lancero_dev *lro, unsigned int config_offset)
 	}
 
 	payload = read_register(reg + 0x08);
+	printk(KERN_ERR "Payload = 0x%08x.\n", payload);
 	maxread = read_register(reg + 0x0c);
+	printk(KERN_ERR "MaxRead =  0x%08x.\n", maxread);
 
 	/* read Lancero System identifier */
 	w = read_register(reg + 0x10) & 0x0000ffffUL;
