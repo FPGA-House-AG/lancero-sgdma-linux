@@ -27,6 +27,9 @@ int sgm_get_user_pages(struct sg_mapping_t *sgm, const char *start, size_t count
 int sgm_put_user_pages(struct sg_mapping_t *sgm, int dirtied);
 void sgm_dirty_pages(struct sg_mapping_t *sgm);
 
+int sgm_get_user_pages_vectored(struct sg_mapping_t *sgm, const struct iovec *iov, unsigned long iov_count, int to_user);
+
+
 int sgm_kernel_pages(struct sg_mapping_t *sgm, const char *start, size_t count, int to_user);
 
 

@@ -1,7 +1,9 @@
 /**
  * Driver module exercising scatterlist interfaces
  *
- * (C) Copyright 2008-2010 Leon Woestenberg  <leon@sidebranch.com>
+ * Copyright (C) 2007-2012 Sidebranch
+ *
+ * Leon Woestenberg <leon@sidebranch.com>
  *
  */
 
@@ -14,12 +16,12 @@
 #include <linux/io.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
-#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/types.h>
+#include <linux/uio.h>
 
 #include <asm/byteorder.h>
 #include <asm/cacheflush.h>
@@ -27,6 +29,8 @@
 #include <asm/pci.h>
 
 #include "lancero-user.h"
+
+int lancero_pages_currently_mapped = 0;
 
 /*
  * sg_create_mapper() - Create a mapper for virtual memory to scatterlist.
@@ -40,34 +44,33 @@
 struct sg_mapping_t *sg_create_mapper(unsigned long max_len)
 {
 	struct sg_mapping_t *sgm;
-	if (max_len == 0)
+  WARN_ON(max_len == 0);
+	if (max_len == 0) {
 		return NULL;
+  }
 	/* allocate bookkeeping */
 	sgm = kcalloc(1, sizeof(struct sg_mapping_t), GFP_KERNEL);
+  WARN_ON(sgm == NULL);
 	if (sgm == NULL)
 		return NULL;
 	/* upper bound of pages */
 	sgm->max_pages = max_len / PAGE_SIZE + 2;
 	/* allocate an array of struct page pointers */
 	sgm->pages = kcalloc(sgm->max_pages, sizeof(*sgm->pages), GFP_KERNEL);
+  WARN_ON(sgm->pages == NULL);
 	if (sgm->pages == NULL) {
 		kfree(sgm);
 		return NULL;
 	}
-	pr_debug("Allocated %d bytes for page pointer array for %d pages @0x%p.\n",
-		sgm->max_pages * sizeof(*sgm->pages), sgm->max_pages, sgm->pages);
 	/* allocate a scatter gather list */
 	sgm->sgl = kcalloc(sgm->max_pages, sizeof(struct scatterlist), GFP_KERNEL);
+  WARN_ON(sgm->sgl == NULL);
 	if (sgm->sgl == NULL) {
 		kfree(sgm->pages);
 		kfree(sgm);
 		return NULL;
 	}
-	pr_debug("Allocated %d bytes for scatterlist for %d pages @0x%p.\n",
-		sgm->max_pages * sizeof(struct scatterlist), sgm->max_pages, sgm->sgl);
 	sg_init_table(sgm->sgl, sgm->max_pages);
-	pr_debug("sg_mapping_t *sgm=0x%p\n", sgm);
-	pr_debug("sgm->pages=0x%p\n", sgm->pages);
 	return sgm;
 };
 
@@ -86,7 +89,6 @@ void sg_destroy_mapper(struct sg_mapping_t *sgm)
 	kfree(sgm->pages);
 	/* free mapper handle */
 	kfree(sgm);
-	pr_debug("Freed page pointer and scatterlist.\n");
 };
 
 /*
@@ -119,24 +121,21 @@ int sgm_get_user_pages(struct sg_mapping_t *sgm, const char *start, size_t count
 	/* pointer to array of page pointers */
 	struct page **pages = sgm->pages;
 
-	pr_debug("sgm_map_user_pages()\n");
-	pr_debug("sgl = 0x%p.\n", sgl);
-
 	/* no pages should currently be mapped */
-	BUG_ON(sgm->mapped_pages > 0);
-	if (start + count < start)
+	if (start + count < start) {
+		printk(KERN_DEBUG "sgm_get_user_pages(): start + count < start?!\n");
 		return -EINVAL;
-	if (nr_pages > sgm->max_pages)
+	}
+	if (nr_pages > sgm->max_pages) {
+		printk(KERN_DEBUG "sgm_get_user_pages(): nr_pages > sgm->max_pages?!\n");
 		return -EINVAL;
-	if (count == 0)
+	}
+	if (count == 0) {
+		printk(KERN_DEBUG "sgm_get_user_pages(): count = 0?!\n");
 		return 0;
+	}
 	/* initialize scatter gather list */
 	sg_init_table(sgl, nr_pages);
-
-	pr_debug("pages=0x%p\n", pages);
-	pr_debug("start = 0x%llx.\n",
-		(unsigned long long)start);
-	pr_debug("first = %lu, last = %lu\n", first, last);
 
 	for (i = 0; i < nr_pages - 1; i++) {
 		pages[i] = NULL;
@@ -146,22 +145,15 @@ int sgm_get_user_pages(struct sg_mapping_t *sgm, const char *start, size_t count
 	/* to_user != 0 means read from device, write into user space buffer memory */
 	rc = get_user_pages(current, current->mm, (unsigned long)start, nr_pages, to_user,
 		0 /* don't force */, pages, NULL);
-	pr_debug("get_user_pages(%lu, nr_pages = %d) == %d.\n", (unsigned long)start, nr_pages, rc);
 	up_read(&current->mm->mmap_sem);
 
-	for (i = 0; i < nr_pages - 1; i++) {
-		pr_debug("%04d: page=0x%p\n", i, pages[i]);
-	}
 	/* errors and no page mapped should return here */
 	if (rc < nr_pages) {
+		printk(KERN_DEBUG "sgm_get_user_pages(): rc = %d, nr_pages = %d\n", rc, nr_pages);
 		if (rc > 0) sgm->mapped_pages = rc;
-		pr_debug("Could not get_user_pages(), %d.\n", rc);
 		goto out_unmap;
 	}
-	/* XXX */
-	BUG_ON(rc != nr_pages);
 	sgm->mapped_pages = rc;
-	pr_debug("sgm->mapped_pages = %d\n", sgm->mapped_pages);
 
 	/* XXX: scsi/st.c is mentioning this as FIXME */
 	for (i = 0; i < nr_pages; i++) {
@@ -169,22 +161,12 @@ int sgm_get_user_pages(struct sg_mapping_t *sgm, const char *start, size_t count
 	}
 
 	/* populate the scatter/gather list */
-	pr_debug("%04d: page=0x%p\n", 0, (void *)pages[0]);
-
 	sg_set_page(&sgl[0], pages[0], 0 /*length*/, offset_in_page(start));
-	pr_debug("sg_page(&sgl[0]) = 0x%p (pfn = %lu).\n", sg_page(&sgl[0]),
-		page_to_pfn(sg_page(&sgl[0])));
-
-	/* verify if the page start address got into the first sg entry */
-	pr_debug("sg_dma_address(&sgl[0])=0x%016llx.\n", (u64)sg_dma_address(&sgl[0]));
-	pr_debug("sg_dma_len(&sgl[0])=0x%08x.\n", sg_dma_len(&sgl[0]));
 
 	/* multiple pages? */
 	if (nr_pages > 1) {
 		/* offset was already set above */
 		sgl[0].length = PAGE_SIZE - sgl[0].offset;
-		pr_debug("%04d: page=0x%p, pfn=%lu, offset=%u, length=%u (FIRST)\n", 0,
-			(void *)sg_page(&sgl[0]), (unsigned long)page_to_pfn(sg_page(&sgl[0])), sgl[0].offset, sgl[0].length);
 		count -= sgl[0].length;
 		/* iterate over further pages, except the last page */
 		for (i = 1; i < nr_pages - 1; i++) {
@@ -192,23 +174,18 @@ int sgm_get_user_pages(struct sg_mapping_t *sgm, const char *start, size_t count
 			/* set the scatter gather entry i */
 			sg_set_page(&sgl[i], pages[i], PAGE_SIZE, 0/*offset*/);
 			count -= PAGE_SIZE;
-			pr_debug("%04d: page=0x%p, pfn=%lu, offset=%u, length=%u\n", i,
-				(void *)sg_page(&sgl[i]), (unsigned long)page_to_pfn(sg_page(&sgl[i])), sgl[i].offset, sgl[i].length);
 		}
-		/* last page */
-		BUG_ON(count > PAGE_SIZE);
-		/* set count bytes at offset 0 in the page */
+		/* count bytes at offset 0 in the page */
 		sg_set_page(&sgl[i], pages[i], count, 0);
-		pr_debug("%04d: page=0x%p, pfn=%lu, offset=%u, length=%u (LAST)\n", i,
-			(void *)sg_page(&sgl[i]), (unsigned long)page_to_pfn(sg_page(&sgl[i])), sgl[i].offset, sgl[i].length);
 	}
 	/* single page */
 	else {
 		/* limit the count */
 		sgl[0].length = count;
-		pr_debug("%04d: page=0x%p, pfn=%lu, offset=%u, length=%u (SINGLE/FIRST/LAST)\n", 0,
-			(void *)sg_page(&sgl[i]), (unsigned long)page_to_pfn(sg_page(&sgl[0])), sgl[0].offset, sgl[0].length);
 	}
+
+	lancero_pages_currently_mapped += nr_pages;
+	//printk(KERN_DEBUG "sgm_get_user_pages(): nr_pages = %d, mapped = %d\n", nr_pages, lancero_pages_currently_mapped);
 	return nr_pages;
 
 out_unmap:
@@ -231,6 +208,10 @@ out_unmap:
 int sgm_put_user_pages(struct sg_mapping_t *sgm, int dirtied)
 {
 	int i;
+
+	lancero_pages_currently_mapped -= sgm->mapped_pages;
+	//printk(KERN_DEBUG "sgm_put_user_pages(sgm->mapped_pages=%d), mapped = %d\n", sgm->mapped_pages, lancero_pages_currently_mapped);
+
 	/* mark page dirty */
 	if (dirtied)
 		sgm_dirty_pages(sgm);
@@ -266,13 +247,9 @@ int sgm_kernel_pages(struct sg_mapping_t *sgm, const char *start, size_t count, 
 	struct scatterlist *sgl = sgm->sgl;
 	/* pointer to array of page pointers */
 	struct page **pages = sgm->pages;
-	unsigned char *virt = start;
-
-	pr_debug("sgm_kernel_pages()\n");
-	pr_debug("sgl = 0x%p.\n", sgl);
+	unsigned char *virt = (unsigned char *)start;
 
 	/* no pages should currently be mapped */
-	BUG_ON(sgm->mapped_pages > 0);
 	if (start + count < start)
 		return -EINVAL;
 	if (nr_pages > sgm->max_pages)
@@ -282,10 +259,6 @@ int sgm_kernel_pages(struct sg_mapping_t *sgm, const char *start, size_t count, 
 	/* initialize scatter gather list */
 	sg_init_table(sgl, nr_pages);
 
-	pr_debug("pages=0x%p\n", pages);
-	pr_debug("start = 0x%llx.\n",
-		(unsigned long long)start);
-	pr_debug("first = %lu, last = %lu\n", first, last);
 
 	/* get pages belonging to vmalloc()ed space */
 	for (i = 0; i < nr_pages; i++, virt += PAGE_SIZE) {
@@ -295,64 +268,175 @@ int sgm_kernel_pages(struct sg_mapping_t *sgm, const char *start, size_t count, 
 		/* make sure page was allocated using vmalloc_32() */
 		BUG_ON(PageHighMem(pages[i]));
 	}
-	for (i = 0; i < nr_pages; i++) {
-		pr_debug("%04d: page=0x%p\n", i, pages[i]);
-	}
 	sgm->mapped_pages = nr_pages;
-	pr_debug("sgm->mapped_pages = %d\n", sgm->mapped_pages);
 
 	/* XXX: scsi/st.c is mentioning this as FIXME */
 	for (i = 0; i < nr_pages; i++) {
 		flush_dcache_page(pages[i]);
 	}
 
-	/* populate the scatter/gather list */
-	pr_debug("%04d: page=0x%p\n", 0, (void *)pages[0]);
-
 	/* set first page */
 	sg_set_page(&sgl[0], pages[0], 0 /*length*/, offset_in_page(start));
-	pr_debug("sg_page(&sgl[0]) = 0x%p (pfn = %lu).\n", sg_page(&sgl[0]),
-		page_to_pfn(sg_page(&sgl[0])));
-
-	/* verify if the page start address got into the first sg entry */
-	pr_debug("sg_dma_address(&sgl[0])=0x%016llx.\n", (u64)sg_dma_address(&sgl[0]));
-	pr_debug("sg_dma_len(&sgl[0])=0x%08x.\n", sg_dma_len(&sgl[0]));
 
 	/* multiple pages? */
 	if (nr_pages > 1) {
 		/* { sgl[0].offset is already set } */
 		sgl[0].length = PAGE_SIZE - sgl[0].offset;
-		pr_debug("%04d: page=0x%p, pfn=%lu, offset=%u length=%u (F)\n", 0,
-			(void *)sg_page(&sgl[0]), (unsigned long)page_to_pfn(sg_page(&sgl[0])), sgl[0].offset, sgl[0].length);
 		count -= sgl[0].length;
 		/* iterate over further pages, except the last page */
 		for (i = 1; i < nr_pages - 1; i++) {
-			BUG_ON(count < PAGE_SIZE);
 			/* set the scatter gather entry i */
 			sg_set_page(&sgl[i], pages[i], PAGE_SIZE, 0/*offset*/);
 			count -= PAGE_SIZE;
-			pr_debug("%04d: page=0x%p, pfn=%lu, offset=%u length=%u\n", i,
-				(void *)sg_page(&sgl[i]), (unsigned long)page_to_pfn(sg_page(&sgl[i])), sgl[i].offset, sgl[i].length);
 		}
-		/* last page */
-		BUG_ON(count > PAGE_SIZE);
 		/* 'count' bytes remaining at offset 0 in the page */
 		sg_set_page(&sgl[i], pages[i], count, 0);
-		pr_debug("%04d: pfn=%lu, offset=%u length=%u (L)\n", i,
-			(unsigned long)page_to_pfn(sg_page(&sgl[i])), sgl[i].offset, sgl[i].length);
 	}
 	/* single page */
 	else {
 		/* limit the count */
 		sgl[0].length = count;
-		pr_debug("%04d: pfn=%lu, offset=%u length=%u (F)\n", 0,
-			(unsigned long)page_to_pfn(sg_page(&sgl[0])), sgl[0].offset, sgl[0].length);
 	}
 	return nr_pages;
-
 err:
 	rc = -ENOMEM;
 	sgm->mapped_pages = 0;
 	return rc;
 }
 
+#if 0
+/*
+ * sgm_map_user_pages_vectored() - Get user pages and build a scatterlist.
+ *
+ * Calculate how many consecutive pages to map for each I/O vector.
+ *
+ *
+ * @sgm scattergather mapper handle.
+ *
+ *
+ *
+ * @to_user !0 if data direction is from device to user space.
+ *
+ * Returns Number of entries in the table on success, -1 on error.
+ */
+int sgm_get_user_pages_vectored(struct sg_mapping_t *sgm, const struct iovec *iov, unsigned long iov_count, int to_user)
+{
+	/* user space buffers bases and sizes */
+    char *start[MAX_VECTOR];
+    size_t count[MAX_VECTOR];
+    /* page numbers */
+	unsigned long first[MAX_VECTOR];
+	unsigned long last[MAX_VECTOR];
+	int nr_pages[MAX_VECTOR], nr_pages_total = 0;
+	int rc, i, v, mapped_pages;
+	struct scatterlist *sgl = sgm->sgl;
+	/* pointer to array of page pointers */
+	//struct page **pages = sgm->pages;
+
+	if (iov_count == 0) {
+		printk(KERN_DEBUG "sgm_get_user_pages_vectored(): iov_count = 0?!\n");
+		return 0;
+	}
+	/* local modifiable copy of user space buffers bases and sizes */
+	for (v = 0; v < count; v++) {
+		start[v] = (char *)iov[v]->iov_base;
+		count[v] = (size_t)iov[v]->iov_len;
+		if (count[v] == 0) {
+			printk(KERN_DEBUG "sgm_get_user_pages_vectored(): count[v%d] = 0?!\n", v);
+		return 0;
+	}
+
+	for (v = 0; v < count; v++) {
+    	first[v] = ((unsigned long)iov[v]->iov_base & PAGE_MASK) >> PAGE_SHIFT;
+    	last[v] = (((unsigned long)iov[v]->iov_base + iov[v]->iov_len - 1) & PAGE_MASK) >> PAGE_SHIFT;
+  		/* the number of pages we want to map in */
+		nr_pages[v] = last[v] - first[v] + 1;
+		nr_pages_total += nr_pages[v];
+	}
+
+#if 0
+	/* no pages should currently be mapped */
+	if (start + count < start) {
+		printk(KERN_DEBUG "sgm_get_user_pages(): start + count < start?!\n");
+		return -EINVAL;
+	}
+#endif
+	if (nr_pages_total > sgm->max_pages) {
+		printk(KERN_DEBUG "sgm_get_user_pages(): nr_pages > sgm->max_pages?!\n");
+		return -EINVAL;
+	}
+	/* initialize scatter gather list */
+	sg_init_table(sgl, nr_pages_total);
+
+	for (i = 0; i < nr_pages_total - 1; i++) {
+		sgm->pages[i] = NULL;
+	}
+	 = 0;
+	sgm->mapped_pages = 0;
+
+	/* iterate over vectors, and map pages for each user buffer */
+	for (v = 0; v < count; v++) {
+		/* try to fault in all of the necessary pages */
+		down_read(&current->mm->mmap_sem);
+		/* to_user != 0 means read from device, write into user space buffer memory */
+		mapped_pages = get_user_pages(current, current->mm, (unsigned long)iov[v]->iov_base, nr_pages[v], to_user,
+			0 /* don't force */, &sgm->pages[sgm->mapped_pages], NULL);
+		up_read(&current->mm->mmap_sem);
+
+		/* errors and no page mapped should return here */
+		if (mapped_pages < nr_pages_total) {
+			printk(KERN_DEBUG "sgm_get_user_pages(): rc = %d, nr_pages = %d\n", mapped_pages, nr_pages);
+			/* list of pages was partially mapped??! */
+			if (mapped_pages > 0) sgm->mapped_pages += mapped_pages;
+			goto out_unmap;
+		}
+		sgm->mapped_pages += mapped_pages;
+	}
+
+	/* XXX: scsi/st.c is mentioning this as FIXME */
+	for (i = 0; i < nr_pages_total; i++) {
+		flush_dcache_page(sgm->pages[i]);
+	}
+#if 0
+	for ()
+
+	/* populate the scatter/gather list */
+	sg_set_page(&sgl[0], sgm->pages[0], 0 /*length*/, offset_in_page(start));
+
+	/* multiple pages? */
+	if (nr_pages > 1) {
+		/* offset was already set above */
+		sgl[0].length = PAGE_SIZE - sgl[0].offset;
+		count -= sgl[0].length;
+		/* iterate over further pages, except the last page */
+		for (i = 1; i < nr_pages - 1; i++) {
+			BUG_ON(count < PAGE_SIZE);
+			/* set the scatter gather entry i */
+			sg_set_page(&sgl[i], sgm->pages[i], PAGE_SIZE, 0/*offset*/);
+			count -= PAGE_SIZE;
+		}
+		/* count bytes at offset 0 in the page */
+		sg_set_page(&sgl[i], sgm->pages[i], count, 0);
+	}
+	/* single page */
+	else {
+		/* limit the count */
+		sgl[0].length = count;
+	}
+
+#endif
+
+	lancero_pages_currently_mapped += nr_pages_total;
+	//printk(KERN_DEBUG "sgm_get_user_pages(): nr_pages_total = %d, mapped = %d\n", nr_pages_total, lancero_pages_currently_mapped);
+	return nr_pages;
+
+out_unmap:
+	/* { rc < 0 means errors, >= 0 means not all pages could be mapped } */
+	/* did we map any pages? */
+	for (i = 0; i < sgm->mapped_pages; i++)
+		put_page(sgm->pages[i]);
+	rc = -ENOMEM;
+	sgm->mapped_pages = 0;
+	return rc;
+}
+#endif
