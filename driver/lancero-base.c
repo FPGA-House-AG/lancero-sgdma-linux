@@ -25,7 +25,10 @@
 #include <linux/slab.h>
 #include <linux/uio.h>
 #include <linux/workqueue.h>
+#include <linux/uio.h>
+#include <linux/version.h>
 
+/* kernel bug: linux/aio.h depends on linux/kobject.h linux/kdev_t.h */
 #include <linux/aio.h>
 #include <linux/splice.h>
 
@@ -41,11 +44,16 @@
 #ifndef __devexit
 #  define __devexit
 #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+	#define AIO_COMPLETE(iocb, done, x) iocb->ki_complete(iocb, done, x)
+#else
+	#define AIO_COMPLETE(iocb, done, x) aio_complete(iocb, done, x)
+#endif
 
 /* compile-time options */
 #define CHAIN_MULTIPLE_TRANSFERS 1
 
-MODULE_LICENSE("Copyright (C) 2009-2014 Sidebranch");
+MODULE_LICENSE("Copyright (C) 2009-2019 Sidebranch");
 
 #define DRV_NAME "lancero"
 #define LANCERO_KNOWN_REVISION (0x01)
@@ -683,7 +691,7 @@ static void engine_reset(struct lancero_engine *engine)
 				free_transfer(engine->lro, transfer);
 				transfer = NULL;
 				/* indicate I/O completion XXX res, res2 */
-				aio_complete(iocb, done, 0);
+				AIO_COMPLETE(iocb, done, 0);
 		/* synchronous I/O? */
 		} else {
 			/* awake task on transfer's wait queue */
@@ -939,7 +947,7 @@ LANCERO_STAT_NONALIGNED_STOPPED)
 				free_transfer(engine->lro, transfer);
 				//printk(KERN_DEBUG "Completing async I/O iocb %p with size %d\n", iocb, (int)done);
 				/* indicate I/O completion XXX res, res2 */
-				aio_complete(iocb, done, 0);
+					AIO_COMPLETE(iocb, done, 0);
 			/* synchronous I/O? */
 			} else {
 				/* initiator no longer cares or waits for the transfer */
@@ -999,7 +1007,7 @@ LANCERO_STAT_NONALIGNED_STOPPED)
 					free_transfer(engine->lro, transfer);
 					transfer = NULL;
 					/* indicate I/O completion XXX res, res2 */
-					aio_complete(iocb, done, 0);
+					AIO_COMPLETE(iocb, done, 0);
 				/* synchronous I/O? */
 				} else {
 					/* initiator no longer cares or waits for the transfer */
@@ -2157,6 +2165,17 @@ unsigned long nr_segs, loff_t pos)
         return sg_aio_read_write(iocb, iov, nr_segs, pos, 1/*dir_to_dev = 1*/);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+static ssize_t sg_read_iter(struct kiocb *iocb, struct iov_iter *to)
+{
+    return sg_aio_read_write(iocb, to->iov, to->nr_segs, iocb->ki_pos, 0);
+}
+static ssize_t sg_write_iter(struct kiocb *iocb, struct iov_iter *to)
+{
+    return sg_aio_read_write(iocb, to->iov, to->nr_segs, iocb->ki_pos, 1);
+}
+#endif
+
 #if 0
 static ssize_t char_sgdma_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -2916,8 +2935,13 @@ static struct file_operations sg_fops = {
 #endif
 #if 1
 	/* asynchronous */
+#  if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+        .read_iter = sg_read_iter,
+        .write_iter = sg_write_iter,
+#  else
 	.aio_read = sg_aio_read,
 	.aio_write = sg_aio_write,
+#  endif
 #endif
 };
 
@@ -3060,7 +3084,6 @@ static struct pci_driver pci_driver = {
 static int __init lancero_init(void)
 {
 	int rc = 0;
-	printk(KERN_INFO DRV_NAME " built " __DATE__ " " __TIME__ "\n");
 	rc = pci_register_driver(&pci_driver);
 	return rc;
 }
