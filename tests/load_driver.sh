@@ -4,6 +4,8 @@
 # Choose any number that is not in use on your system 
 MAJOR=130
 
+sudo lspci -d 1172: -vvvn | grep -e 'LnkSta:.*8GT.*x'
+
 sudo rmmod -s lancero
 
 echo -n "(Re-) Creating device nodes in the current directory... (might ask for sudo password)"
