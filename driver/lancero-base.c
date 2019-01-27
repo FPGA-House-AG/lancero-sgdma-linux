@@ -1638,6 +1638,7 @@ static int interrupts_enable(struct lancero_dev *lro, int interrupts_offset, u32
 	u32 w;
 	int rc = 0;
 	unsigned long flags;
+	int failed = 0;
 	spin_lock_irqsave(&lro->irq_lock, flags);
 	/* update desired interrupt enable mask in shadow register */
 	lro->irq_enabled_shadow |= ints;
@@ -1645,9 +1646,10 @@ static int interrupts_enable(struct lancero_dev *lro, int interrupts_offset, u32
 	iowrite32(lro->irq_enabled_shadow, reg + 0x04);
 	/* read back (flushes write) */
 	w = ioread32(reg + 0x04);
+	failed = (w != lro->irq_enabled_shadow);
 	spin_unlock_irqrestore(&lro->irq_lock, flags);
 	/* verify all interrupt were enabled */
-	if (w != lro->irq_enabled_shadow) {
+	if (failed) {
 		printk(KERN_DEBUG "Could not set interrupt enable register?!\n");
 		rc = -1;
 	}
