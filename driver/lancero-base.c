@@ -1719,8 +1719,8 @@ static int lancero_config(struct lancero_dev *lro, unsigned int config_offset)
 	/* Lancero Target Bridge */
 	if (w == 0xFF01UL)
 		printk(KERN_DEBUG "Lancero Target Bridge\n");
-	/* Lancero SGDMA */
-	else if (w == 0xFF02UL) {
+	/* Lancero PCIe SGDMA [Multi-Channel] */
+	else if ((w == 0xFF02UL) || (w == 0xFF08UL)) {
 		/* versions lower than 2 had a fixed configuration */
 		if (version < 2) {
 			/* read and write engines always present */
@@ -1734,6 +1734,7 @@ static int lancero_config(struct lancero_dev *lro, unsigned int config_offset)
 				lro->capabilities |= CAP_ENGINE_WRITE;
 				/* determine address and size alignment for write DMA */
 				if (w & CONFIG_WDMA_32) lro->align[/*dir_to_dev=*/0] = 4;
+				else if (w & CONFIG_WDMA_64) lro->align[/*dir_to_dev=*/0] = 8;
 				else if (w & CONFIG_WDMA_128) lro->align[/*dir_to_dev=*/0] = 16;
 				else if (w & CONFIG_WDMA_256) lro->align[/*dir_to_dev=*/0] = 32;
 				else lro->align[/*dir_to_dev=*/0] = 8;
@@ -1745,6 +1746,7 @@ static int lancero_config(struct lancero_dev *lro, unsigned int config_offset)
 				lro->capabilities |= CAP_ENGINE_READ;
 				/* determine address and size alignment for read DMA */
 				if (w & CONFIG_RDMA_32) lro->align[/*dir_to_dev=*/1] = 4;
+				else if (w & CONFIG_RDMA_64) lro->align[/*dir_to_dev=*/1] = 8;
 				else if (w & CONFIG_RDMA_128) lro->align[/*dir_to_dev=*/1] = 16;
 				else if (w & CONFIG_RDMA_256) lro->align[/*dir_to_dev=*/1] = 32;
 				else lro->align[/*dir_to_dev=*/1] = 8;
