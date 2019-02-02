@@ -21,11 +21,11 @@ static struct option const long_opts[] =
   {"device", required_argument, NULL, 'd'},
   {"address", required_argument, NULL, 'a'},
   {"size", required_argument, NULL, 's'},
-  {"count", no_argument, NULL, 'c'}, 
-  {"file", no_argument, NULL, 'f'}, 
-  {"verbose", no_argument, NULL, 'v'}, 
+  {"count", no_argument, NULL, 'c'},
+  {"file", no_argument, NULL, 'f'},
+  {"verbose", no_argument, NULL, 'v'},
   {"help", no_argument, NULL, 'h'},
-  {0, 0, 0, 0}  
+  {0, 0, 0, 0}
 };
 
 static int test_dma(char *devicename, uint32_t addr, uint32_t size, uint32_t count, char *filename);
@@ -35,13 +35,13 @@ static void usage(const char* name)
   int i = 0;
   printf("%s\n\n", name);
   printf("usage: %s [OPTIONS]\n\n", name);
-  printf("Read using SGDMA and write output to output.bin\n\n", name);
+  printf("Read using SGDMA, optionally writing data to file.\n\n");
 
   printf("  -%c (--%s) device (defaults to ./lancero_sgdma)\n", long_opts[i].val, long_opts[i].name); i++;
-  printf("  -%c (--%s) address of the start address on the Avalon bus\n", long_opts[i].val, long_opts[i].name); i++;      
+  printf("  -%c (--%s) address of the start address on the Avalon bus\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) size of a single transfer\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) number of transfers\n", long_opts[i].val, long_opts[i].name); i++;
-  printf("  -%c (--%s) filename to read/write the data of the transfers\n", long_opts[i].val, long_opts[i].name); i++;
+  printf("  -%c (--%s) filename to write the data of the transfers to\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) be more verbose during test\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) print usage help and exit\n", long_opts[i].val, long_opts[i].name); i++;
 }
@@ -71,7 +71,7 @@ int main(int argc, char* argv[])
     switch (cmd_opt)
     {
       case 0:
-        /* long option */        
+        /* long option */
         break;
       case 'v':
         verbosity++;
@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
       case 'd':
 	printf("'%s'\n", optarg);
         device = strdup(optarg);
-        break;                
+        break;
       /* RAM address on the Avalon bus in bytes */
       case 'a':
         address = getopt_integer(optarg);
@@ -120,7 +120,7 @@ static int test_dma(char *devicename, uint32_t addr, uint32_t size, uint32_t cou
   int file_fd = -1;
   int fpga_fd = open(devicename, O_RDWR | O_NONBLOCK);
   assert(fpga_fd >= 0);
-  
+
   /* create file to write data to */
   if (filename) {
     file_fd = open(filename, O_RDWR | O_CREAT | O_TRUNC | O_SYNC, 0666);
@@ -128,10 +128,14 @@ static int test_dma(char *devicename, uint32_t addr, uint32_t size, uint32_t cou
   }
 
   while (count--) {
+#if 0
     /* select Avalon MM address */
     off_t off = lseek(fpga_fd, addr, SEEK_SET);
     /* read data from Avalon MM into buffer using SGDMA */
     rc = read(fpga_fd, buffer, size);
+#else
+    rc = pread(fpga_fd, buffer, size, addr);
+#endif
     assert(rc == size);
     /* file argument given? */
     if (file_fd >= 0) {
