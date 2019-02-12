@@ -35,13 +35,13 @@ static void usage(const char* name)
   int i = 0;
   printf("%s\n\n", name);
   printf("usage: %s [OPTIONS]\n\n", name);
-  printf("Read using SGDMA and write output to output.bin\n\n", name);
+  printf("Write data using SGDMA, optionally the data comes from a file.\n\n");
 
   printf("  -%c (--%s) device\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) address of the start address on the Avalon bus\n", long_opts[i].val, long_opts[i].name); i++;      
   printf("  -%c (--%s) size of a single transfer\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) number of transfers\n", long_opts[i].val, long_opts[i].name); i++;
-  printf("  -%c (--%s) filename to read/write the data of the transfers\n", long_opts[i].val, long_opts[i].name); i++;
+  printf("  -%c (--%s) filename to read the data of the transfers\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) be more verbose during test\n", long_opts[i].val, long_opts[i].name); i++;
   printf("  -%c (--%s) print usage help and exit\n", long_opts[i].val, long_opts[i].name); i++;
 }
@@ -133,10 +133,14 @@ static int test_dma(char *devicename, uint32_t addr, uint32_t size, uint32_t cou
       rc = read(file_fd, buffer, size);
       assert(rc == size);
     }
+#if 0
     /* select Avalon MM address */
     off_t off = lseek(fpga_fd, addr, SEEK_SET);
     /* write buffer to Avalon MM address using SGDMA */
     rc = write(fpga_fd, buffer, size);
+#else
+    rc = pwrite(fpga_fd, buffer, size, addr);
+#endif
     assert(rc == size);
   }
   close(fpga_fd);
