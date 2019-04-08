@@ -3,14 +3,18 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <time.h>
+
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
-#include <unistd.h>
 
 static int verbosity = 0;
 static int read_back = 0;
@@ -110,12 +114,103 @@ int main(int argc, char* argv[])
 
 }
 
+/* subtracts t2 from t1, the result is in t1
+ * t1 and t2 should be already normalized, i.e. nsec in [0, 1000000000)
+ */
+static void timespec_sub(struct timespec *t1, const struct timespec *t2)
+{
+  assert(t1->tv_nsec >= 0);
+  assert(t1->tv_nsec < 1000000000);
+  assert(t2->tv_nsec >= 0);
+  assert(t2->tv_nsec < 1000000000);
+  t1->tv_sec -= t2->tv_sec;
+  t1->tv_nsec -= t2->tv_nsec;
+  if (t1->tv_nsec >= 1000000000)
+  {
+    t1->tv_sec++;
+    t1->tv_nsec -= 1000000000;
+  }
+  else if (t1->tv_nsec < 0)
+  {
+    t1->tv_sec--;
+    t1->tv_nsec += 1000000000;
+  }
+}
+
+static long long total_ns = 0;
+static long long largest_ns = 0;
+static long long largest_difference_ns = 0;
+static long long total_num = 0;
+
+#define NUM_TIMINGS_MAX 6000
+static long timings[NUM_TIMINGS_MAX];
+
+static int add_timing(long ns)
+{
+  /* store timing sample */
+  timings[total_num] = ns;
+  /* remember largest timing sample */
+  if (ns > largest_ns) largest_ns = ns;
+  /* accumulate samples */
+  total_ns += ns;
+  total_num += 1;
+}
+
+/* calculate mean of samples */
+static long long timing_mean(void)
+{
+  return total_ns / total_num;
+}
+
+static long long timing_variance(long long mean)
+{
+  long long result_variance = 0;
+  long long total_squared_diffs_ns = 0;
+
+  largest_difference_ns = 0;
+
+  assert(total_num >= 1);
+  /* subtract mean from each sample, and square the result, all in-place */
+  /* @NOTE: this modifies the timings[], so take and remember mean first! */
+  for (int i = 0; i < total_num; i++)
+  {
+     /* calculate difference between sample and mean */
+    long long difference_ns = (long long)timings[i] - (long long)mean;
+
+    /* remember largest difference */
+    if (difference_ns > largest_difference_ns) largest_difference_ns = difference_ns;
+
+    /* accumulate squared sample difference to mean */
+    total_squared_diffs_ns += (difference_ns * difference_ns);
+  }
+  result_variance = total_squared_diffs_ns / total_num;
+  return result_variance;
+}
+
+static double timing_deviation(long long variance)
+{
+  return sqrt(variance);
+}
+
+static void timing_print(void)
+{
+  /* calculate and remember mean value */
+  long long mean = timing_mean();
+  long long variance = timing_variance(mean);
+  double deviation = timing_deviation(variance);
+  printf("mean = %lld ns, largest = %lld ns, largest_difference = %lld, variance = %lld ns, deviation = %f ns\n",
+    mean, largest_ns, largest_difference_ns, variance, deviation);
+}
+
 static int test_dma(char *devicename, uint32_t addr, uint32_t size, uint32_t count, char *filename)
 {
   int rc;
   char *buffer = NULL;
+  struct timespec ts_start, ts_end;
   posix_memalign((void **)&buffer, 32, size);
   assert(buffer);
+
+  assert(count <= NUM_TIMINGS_MAX);
 
   int file_fd = -1;
   int fpga_fd = open(devicename, O_RDWR | O_NONBLOCK);
@@ -128,15 +223,27 @@ static int test_dma(char *devicename, uint32_t addr, uint32_t size, uint32_t cou
   }
 
   while (count--) {
+
+    rc = clock_gettime(CLOCK_MONOTONIC, &ts_start);
+
 #if 0
     /* select Avalon MM address */
     off_t off = lseek(fpga_fd, addr, SEEK_SET);
     /* read data from Avalon MM into buffer using SGDMA */
     rc = read(fpga_fd, buffer, size);
 #else
+    /* do the above in one system call */
     rc = pread(fpga_fd, buffer, size, addr);
 #endif
+
     assert(rc == size);
+
+    rc = clock_gettime(CLOCK_MONOTONIC, &ts_end);
+    /* subtract the start time from the end time */
+    timespec_sub(&ts_end, &ts_start);
+    assert(ts_end.tv_sec == 0);
+    add_timing(ts_end.tv_nsec);
+
     /* file argument given? */
     if (file_fd >= 0) {
       /* write buffer to file */
@@ -144,6 +251,12 @@ static int test_dma(char *devicename, uint32_t addr, uint32_t size, uint32_t cou
       assert(rc == size);
     }
   }
+
+  timing_print();
+
+  /* display passed time, a bit less accurate but side-effects are accounted for */
+  printf("CLOCK_MONOTONIC reports %ld.%09ld seconds (total) for %d bytes\n", ts_end.tv_sec, ts_end.tv_nsec, size);
+
   close(fpga_fd);
   if (file_fd >=0) {
     close(file_fd);

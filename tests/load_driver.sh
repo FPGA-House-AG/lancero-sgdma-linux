@@ -4,7 +4,9 @@
 # Choose any number that is not in use on your system 
 MAJOR=130
 
+sudo setpci -d 1172: 0x88.w=0x0100:0100
 sudo lspci -d 1172: -vvvn | grep -e 'LnkSta:.*8GT.*x'
+sudo lspci -d 1172: -vvvn | grep -e 'ExtTag'
 
 sudo rmmod -s lancero
 
