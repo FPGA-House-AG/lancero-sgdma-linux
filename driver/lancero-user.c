@@ -91,6 +91,24 @@ void sg_destroy_mapper(struct sg_mapping_t *sgm)
 	kfree(sgm);
 };
 
+#if 0
+long get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
+                    unsigned long start, unsigned long nr_pages,
+                    unsigned int gup_flags, struct page **pages,
+                    struct vm_area_struct **vmas);
+long get_user_pages_locked(struct task_struct *tsk, struct mm_struct *mm,
+                    unsigned long start, unsigned long nr_pages,
+                    unsigned int gup_flags, struct page **pages, int *locked);
+long __get_user_pages_unlocked(struct task_struct *tsk, struct mm_struct *mm,
+                               unsigned long start, unsigned long nr_pages,
+                               struct page **pages, unsigned int gup_flags);
+long get_user_pages_unlocked(struct task_struct *tsk, struct mm_struct *mm,
+                    unsigned long start, unsigned long nr_pages,
+                    struct page **pages, unsigned int gup_flags);
+int get_user_pages_fast(unsigned long start, int nr_pages, int write,
+                        struct page **pages);
+#endif
+
 /*
  * sgm_map_user_pages() - Get user pages and build a scatterlist.
  *
@@ -140,11 +158,19 @@ int sgm_get_user_pages(struct sg_mapping_t *sgm, const char *start, size_t count
 	for (i = 0; i < nr_pages - 1; i++) {
 		pages[i] = NULL;
 	}
+
 	/* try to fault in all of the necessary pages */
 	down_read(&current->mm->mmap_sem);
+
+#if 0 /* older API */
 	/* to_user != 0 means read from device, write into user space buffer memory */
 	rc = get_user_pages(current, current->mm, (unsigned long)start, nr_pages, to_user,
 		0 /* don't force */, pages, NULL);
+#else /* newer API, @TODO use kernel version */
+	/* to_user != 0 means read from device, write into user space buffer memory */
+	rc = get_user_pages(current, current->mm, (unsigned long)start, nr_pages, to_user? FOLL_WRITE: 0,
+		pages, NULL);
+#endif
 	up_read(&current->mm->mmap_sem);
 
 	/* errors and no page mapped should return here */
