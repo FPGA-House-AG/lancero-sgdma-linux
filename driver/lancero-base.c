@@ -1,9 +1,22 @@
 /*
  * Driver for Lancero SGDMA for FPGA logic
  *
- * Copyright (C) 2007-2014 Sidebranch
+ * Copyright (C) 2007-2020 Sidebranch, Leon Woestenberg <leon@sidebranch.com>
+ * Copyright (C) 2020-2023 BrightAI BV, Leon Woestenberg <leon@brightai.nl>
  *
- * Leon Woestenberg <leon@sidebranch.com>
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -53,7 +66,7 @@
 /* compile-time options */
 #define CHAIN_MULTIPLE_TRANSFERS 1
 
-MODULE_LICENSE("Copyright (C) 2009-2019 Sidebranch");
+MODULE_LICENSE("Copyright (C) 2009-2020 Sidebranch, 2020-2023 BrightAI BV");
 
 #define DRV_NAME "lancero"
 #define LANCERO_KNOWN_REVISION (0x01)
